@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Admin</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    margin: 0;
+    min-height: 100vh;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.2rem 2rem;
+    background: #1e293b;
+    border-bottom: 1px solid #334155;
+  }
+  header h1 { font-size: 1.2rem; margin: 0; }
+  #logoutBtn {
+    background: #475569;
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #logoutBtn:hover { background: #64748b; }
+  main {
+    max-width: 700px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+  }
+  .upload-box {
+    background: #1e293b;
+    padding: 1.5rem;
+    border-radius: 10px;
+    margin-bottom: 2rem;
+  }
+  input[type="file"] {
+    display: block;
+    margin-bottom: 1rem;
+    color: #e2e8f0;
+  }
+  button.primary {
+    background: #3b82f6;
+    color: white;
+    border: none;
+    padding: 0.7rem 1.4rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1rem;
+  }
+  button.primary:hover { background: #2563eb; }
+  button.primary:disabled { background: #475569; cursor: not-allowed; }
+  .status {
+    margin-top: 0.8rem;
+    font-size: 0.9rem;
+    min-height: 1.2rem;
+  }
+  .status.error { color: #f87171; }
+  .status.success { color: #4ade80; }
+  .file-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #1e293b;
+    padding: 1rem 1.2rem;
+    border-radius: 8px;
+    margin-bottom: 0.8rem;
+  }
+  .file-name { word-break: break-all; margin-right: 1rem; }
+  .actions { display: flex; gap: 0.5rem; white-space: nowrap; }
+  .download-btn, .delete-btn {
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    text-decoration: none;
+    color: white;
+    font-size: 0.9rem;
+  }
+  .download-btn { background: #3b82f6; }
+  .download-btn:hover { background: #2563eb; }
+  .delete-btn { background: #ef4444; }
+  .delete-btn:hover { background: #dc2626; }
+  .empty, .loading {
+    text-align: center;
+    color: #94a3b8;
+    margin-top: 2rem;
+  }
+  .checking {
+    text-align: center;
+    margin-top: 4rem;
+    color: #94a3b8;
+  }
+</style>
+</head>
+<body>
+
+<div id="checkingScreen" class="checking">Checking permissions...</div>
+
+<div id="adminContent" style="display:none;">
+  <header>
+    <h1>Admin Panel</h1>
+    <button id="logoutBtn">Log Out</button>
+  </header>
+
+  <main>
+    <div class="upload-box">
+      <h2 style="margin-top:0;">Upload a file</h2>
+      <input type="file" id="fileInput" />
+      <button class="primary" id="uploadBtn">Upload</button>
+      <div class="status" id="uploadStatus"></div>
+    </div>
+
+    <h2>Existing Files</h2>
+    <div id="fileList" class="loading">Loading files...</div>
+  </main>
+</div>
+
+<script src="supabase-config.js"></script>
+<script>
+  const BUCKET = "files";
+  const checkingScreen = document.getElementById("checkingScreen");
+  const adminContent = document.getElementById("adminContent");
+  const fileInput = document.getElementById("fileInput");
+  const uploadBtn = document.getElementById("uploadBtn");
+  const uploadStatus = document.getElementById("uploadStatus");
+  const fileList = document.getElementById("fileList");
+  const logoutBtn = document.getElementById("logoutBtn");
+
+  // Verify this user is logged in AND is an admin before showing anything
+  (async () => {
+    const { data: sessionData } = await supabaseClient.auth.getSession();
+    if (!sessionData.session) {
+      window.location.href = "index.html";
+      return;
+    }
+
+    const { data: profile, error } = await supabaseClient
+      .from("profiles")
+      .select("role")
+      .eq("id", sessionData.session.user.id)
+      .single();
+
+    if (error || !profile || profile.role !== "admin") {
+      // Not an admin — send to the regular dashboard instead
+      window.location.href = "dashboard.html";
+      return;
+    }
+
+    checkingScreen.style.display = "none";
+    adminContent.style.display = "block";
+    loadFiles();
+  })();
+
+  uploadBtn.addEventListener("click", async () => {
+    const file = fileInput.files[0];
+    if (!file) {
+      uploadStatus.className = "status error";
+      uploadStatus.textContent = "Please choose a file first.";
+      return;
+    }
+
+    uploadBtn.disabled = true;
+    uploadStatus.className = "status";
+    uploadStatus.textContent = "Uploading...";
+
+    // Prefix with timestamp to avoid name collisions
+    const filePath = `${Date.now()}_${file.name}`;
+
+    const { error } = await supabaseClient.storage
+      .from(BUCKET)
+      .upload(filePath, file);
+
+    uploadBtn.disabled = false;
+
+    if (error) {
+      uploadStatus.className = "status error";
+      uploadStatus.textContent = "Upload failed: " + error.message;
+      return;
+    }
+
+    uploadStatus.className = "status success";
+    uploadStatus.textContent = "Uploaded successfully!";
+    fileInput.value = "";
+    loadFiles();
+  });
+
+  async function loadFiles() {
+    const { data: files, error } = await supabaseClient.storage
+      .from(BUCKET)
+      .list("", { sortBy: { column: "created_at", order: "desc" } });
+
+    if (error) {
+      fileList.innerHTML = `<div class="empty">Could not load files: ${error.message}</div>`;
+      return;
+    }
+
+    if (!files || files.length === 0) {
+      fileList.innerHTML = `<div class="empty">No files uploaded yet.</div>`;
+      return;
+    }
+
+    fileList.innerHTML = "";
+    for (const file of files) {
+      const { data: urlData } = await supabaseClient.storage
+        .from(BUCKET)
+        .createSignedUrl(file.name, 60 * 5);
+
+      const item = document.createElement("div");
+      item.className = "file-item";
+
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "file-name";
+      nameSpan.textContent = file.name;
+
+      const actions = document.createElement("div");
+      actions.className = "actions";
+
+      const downloadLink = document.createElement("a");
+      downloadLink.className = "download-btn";
+      downloadLink.textContent = "Download";
+      downloadLink.href = urlData ? urlData.signedUrl : "#";
+      downloadLink.setAttribute("download", file.name);
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "delete-btn";
+      deleteBtn.textContent = "Delete";
+      deleteBtn.addEventListener("click", () => deleteFile(file.name));
+
+      actions.appendChild(downloadLink);
+      actions.appendChild(deleteBtn);
+      item.appendChild(nameSpan);
+      item.appendChild(actions);
+      fileList.appendChild(item);
+    }
+  }
+
+  async function deleteFile(fileName) {
+    if (!confirm(`Delete "${fileName}"? This cannot be undone.`)) return;
+
+    const { error } = await supabaseClient.storage.from(BUCKET).remove([fileName]);
+    if (error) {
+      alert("Delete failed: " + error.message);
+      return;
+    }
+    loadFiles();
+  }
+
+  logoutBtn.addEventListener("click", async () => {
+    await supabaseClient.auth.signOut();
+    window.location.href = "index.html";
+  });
+</script>
+
+</body>
+</html>

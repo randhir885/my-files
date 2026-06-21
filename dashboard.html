@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    margin: 0;
+    min-height: 100vh;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.2rem 2rem;
+    background: #1e293b;
+    border-bottom: 1px solid #334155;
+  }
+  header h1 { font-size: 1.2rem; margin: 0; }
+  #logoutBtn {
+    background: #475569;
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #logoutBtn:hover { background: #64748b; }
+  main {
+    max-width: 700px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+  }
+  .file-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #1e293b;
+    padding: 1rem 1.2rem;
+    border-radius: 8px;
+    margin-bottom: 0.8rem;
+  }
+  .file-name {
+    word-break: break-all;
+    margin-right: 1rem;
+  }
+  .download-btn {
+    background: #3b82f6;
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .download-btn:hover { background: #2563eb; }
+  .empty {
+    text-align: center;
+    color: #94a3b8;
+    margin-top: 3rem;
+  }
+  .loading {
+    text-align: center;
+    color: #94a3b8;
+    margin-top: 3rem;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Your Files</h1>
+  <button id="logoutBtn">Log Out</button>
+</header>
+
+<main>
+  <div id="fileList" class="loading">Loading files...</div>
+</main>
+
+<script src="supabase-config.js"></script>
+<script>
+  const fileList = document.getElementById("fileList");
+  const logoutBtn = document.getElementById("logoutBtn");
+  const BUCKET = "files";
+
+  // Require login
+  (async () => {
+    const { data } = await supabaseClient.auth.getSession();
+    if (!data.session) {
+      window.location.href = "index.html";
+      return;
+    }
+    loadFiles();
+  })();
+
+  async function loadFiles() {
+    const { data: files, error } = await supabaseClient.storage
+      .from(BUCKET)
+      .list("", { sortBy: { column: "created_at", order: "desc" } });
+
+    if (error) {
+      fileList.innerHTML = `<div class="empty">Could not load files: ${error.message}</div>`;
+      return;
+    }
+
+    if (!files || files.length === 0) {
+      fileList.innerHTML = `<div class="empty">No files have been uploaded yet.</div>`;
+      return;
+    }
+
+    fileList.innerHTML = "";
+    for (const file of files) {
+      const { data: urlData, error: urlError } = await supabaseClient.storage
+        .from(BUCKET)
+        .createSignedUrl(file.name, 60 * 5); // link valid for 5 minutes
+
+      const item = document.createElement("div");
+      item.className = "file-item";
+
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "file-name";
+      nameSpan.textContent = file.name;
+
+      const downloadLink = document.createElement("a");
+      downloadLink.className = "download-btn";
+      downloadLink.textContent = "Download";
+      if (!urlError && urlData) {
+        downloadLink.href = urlData.signedUrl;
+        downloadLink.setAttribute("download", file.name);
+      } else {
+        downloadLink.href = "#";
+        downloadLink.textContent = "Unavailable";
+      }
+
+      item.appendChild(nameSpan);
+      item.appendChild(downloadLink);
+      fileList.appendChild(item);
+    }
+  }
+
+  logoutBtn.addEventListener("click", async () => {
+    await supabaseClient.auth.signOut();
+    window.location.href = "index.html";
+  });
+</script>
+
+</body>
+</html>
