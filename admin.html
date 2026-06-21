@@ -23,17 +23,20 @@
     border-bottom: 1px solid #334155;
   }
   header h1 { font-size: 1.2rem; margin: 0; }
-  #logoutBtn {
+  .nav-links { display: flex; gap: 0.6rem; align-items: center; }
+  .nav-links a, .nav-links button {
+    color: #cbd5e1;
+    text-decoration: none;
+    font-size: 0.9rem;
     background: #475569;
-    color: white;
     border: none;
     padding: 0.5rem 1rem;
     border-radius: 6px;
     cursor: pointer;
   }
-  #logoutBtn:hover { background: #64748b; }
+  .nav-links a:hover, .nav-links button:hover { background: #64748b; }
   main {
-    max-width: 700px;
+    max-width: 600px;
     margin: 2rem auto;
     padding: 0 1.5rem;
   }
@@ -43,10 +46,20 @@
     border-radius: 10px;
     margin-bottom: 2rem;
   }
-  input[type="file"] {
-    display: block;
+  label { display: block; margin-bottom: 0.4rem; font-size: 0.9rem; color: #94a3b8; }
+  input[type="file"] { display: block; margin-bottom: 1rem; color: #e2e8f0; }
+  textarea {
+    width: 100%;
+    padding: 0.7rem;
     margin-bottom: 1rem;
+    border-radius: 6px;
+    border: 1px solid #334155;
+    background: #0f172a;
     color: #e2e8f0;
+    font-size: 1rem;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 70px;
   }
   button.primary {
     background: #3b82f6;
@@ -59,23 +72,22 @@
   }
   button.primary:hover { background: #2563eb; }
   button.primary:disabled { background: #475569; cursor: not-allowed; }
-  .status {
-    margin-top: 0.8rem;
-    font-size: 0.9rem;
-    min-height: 1.2rem;
-  }
+  .status { margin-top: 0.8rem; font-size: 0.9rem; min-height: 1.2rem; }
   .status.error { color: #f87171; }
   .status.success { color: #4ade80; }
-  .file-item {
+  .post-item {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     background: #1e293b;
     padding: 1rem 1.2rem;
     border-radius: 8px;
     margin-bottom: 0.8rem;
+    gap: 1rem;
   }
-  .file-name { word-break: break-all; margin-right: 1rem; }
+  .post-info { flex: 1; }
+  .post-info .caption { font-size: 0.9rem; color: #cbd5e1; margin-bottom: 0.3rem; }
+  .post-info .filename { font-size: 0.8rem; color: #64748b; word-break: break-all; }
   .actions { display: flex; gap: 0.5rem; white-space: nowrap; }
   .download-btn, .delete-btn {
     border: none;
@@ -90,16 +102,8 @@
   .download-btn:hover { background: #2563eb; }
   .delete-btn { background: #ef4444; }
   .delete-btn:hover { background: #dc2626; }
-  .empty, .loading {
-    text-align: center;
-    color: #94a3b8;
-    margin-top: 2rem;
-  }
-  .checking {
-    text-align: center;
-    margin-top: 4rem;
-    color: #94a3b8;
-  }
+  .empty, .loading { text-align: center; color: #94a3b8; margin-top: 2rem; }
+  .checking { text-align: center; margin-top: 4rem; color: #94a3b8; }
 </style>
 </head>
 <body>
@@ -109,32 +113,44 @@
 <div id="adminContent" style="display:none;">
   <header>
     <h1>Admin Panel</h1>
-    <button id="logoutBtn">Log Out</button>
+    <div class="nav-links">
+      <a href="feed.html">View Feed</a>
+      <a href="profile.html">My Profile</a>
+      <button id="logoutBtn">Log Out</button>
+    </div>
   </header>
 
   <main>
     <div class="upload-box">
-      <h2 style="margin-top:0;">Upload a file</h2>
+      <h2 style="margin-top:0;">Create a Post</h2>
+      <label for="fileInput">File (image, PDF, etc.)</label>
       <input type="file" id="fileInput" />
-      <button class="primary" id="uploadBtn">Upload</button>
+
+      <label for="captionInput">Caption</label>
+      <textarea id="captionInput" placeholder="Write a caption..."></textarea>
+
+      <button class="primary" id="uploadBtn">Post</button>
       <div class="status" id="uploadStatus"></div>
     </div>
 
-    <h2>Existing Files</h2>
-    <div id="fileList" class="loading">Loading files...</div>
+    <h2>Your Posts</h2>
+    <div id="postList" class="loading">Loading posts...</div>
   </main>
 </div>
 
 <script src="supabase-config.js"></script>
 <script>
-  const BUCKET = "files";
+  const FILES_BUCKET = "files";
   const checkingScreen = document.getElementById("checkingScreen");
   const adminContent = document.getElementById("adminContent");
   const fileInput = document.getElementById("fileInput");
+  const captionInput = document.getElementById("captionInput");
   const uploadBtn = document.getElementById("uploadBtn");
   const uploadStatus = document.getElementById("uploadStatus");
-  const fileList = document.getElementById("fileList");
+  const postList = document.getElementById("postList");
   const logoutBtn = document.getElementById("logoutBtn");
+
+  let currentUserId = null;
 
   // Verify this user is logged in AND is an admin before showing anything
   (async () => {
@@ -143,22 +159,22 @@
       window.location.href = "index.html";
       return;
     }
+    currentUserId = sessionData.session.user.id;
 
     const { data: profile, error } = await supabaseClient
       .from("profiles")
       .select("role")
-      .eq("id", sessionData.session.user.id)
+      .eq("id", currentUserId)
       .single();
 
     if (error || !profile || profile.role !== "admin") {
-      // Not an admin — send to the regular dashboard instead
-      window.location.href = "dashboard.html";
+      window.location.href = "feed.html";
       return;
     }
 
     checkingScreen.style.display = "none";
     adminContent.style.display = "block";
-    loadFiles();
+    loadPosts();
   })();
 
   uploadBtn.addEventListener("click", async () => {
@@ -173,86 +189,117 @@
     uploadStatus.className = "status";
     uploadStatus.textContent = "Uploading...";
 
-    // Prefix with timestamp to avoid name collisions
     const filePath = `${Date.now()}_${file.name}`;
 
-    const { error } = await supabaseClient.storage
-      .from(BUCKET)
+    const { error: uploadError } = await supabaseClient.storage
+      .from(FILES_BUCKET)
       .upload(filePath, file);
+
+    if (uploadError) {
+      uploadBtn.disabled = false;
+      uploadStatus.className = "status error";
+      uploadStatus.textContent = "Upload failed: " + uploadError.message;
+      return;
+    }
+
+    const { error: insertError } = await supabaseClient.from("posts").insert({
+      author_id: currentUserId,
+      caption: captionInput.value.trim(),
+      file_path: filePath,
+      file_type: file.type || "application/octet-stream",
+    });
 
     uploadBtn.disabled = false;
 
-    if (error) {
+    if (insertError) {
       uploadStatus.className = "status error";
-      uploadStatus.textContent = "Upload failed: " + error.message;
+      uploadStatus.textContent = "Post creation failed: " + insertError.message;
       return;
     }
 
     uploadStatus.className = "status success";
-    uploadStatus.textContent = "Uploaded successfully!";
+    uploadStatus.textContent = "Posted!";
     fileInput.value = "";
-    loadFiles();
+    captionInput.value = "";
+    loadPosts();
   });
 
-  async function loadFiles() {
-    const { data: files, error } = await supabaseClient.storage
-      .from(BUCKET)
-      .list("", { sortBy: { column: "created_at", order: "desc" } });
+  async function loadPosts() {
+    const { data: posts, error } = await supabaseClient
+      .from("posts")
+      .select("id, caption, file_path, file_type, created_at")
+      .order("created_at", { ascending: false });
 
     if (error) {
-      fileList.innerHTML = `<div class="empty">Could not load files: ${error.message}</div>`;
+      postList.innerHTML = `<div class="empty">Could not load posts: ${error.message}</div>`;
       return;
     }
 
-    if (!files || files.length === 0) {
-      fileList.innerHTML = `<div class="empty">No files uploaded yet.</div>`;
+    if (!posts || posts.length === 0) {
+      postList.innerHTML = `<div class="empty">No posts yet.</div>`;
       return;
     }
 
-    fileList.innerHTML = "";
-    for (const file of files) {
+    postList.innerHTML = "";
+    for (const post of posts) {
       const { data: urlData } = await supabaseClient.storage
-        .from(BUCKET)
-        .createSignedUrl(file.name, 60 * 5);
+        .from(FILES_BUCKET)
+        .createSignedUrl(post.file_path, 60 * 5);
 
       const item = document.createElement("div");
-      item.className = "file-item";
+      item.className = "post-item";
 
-      const nameSpan = document.createElement("span");
-      nameSpan.className = "file-name";
-      nameSpan.textContent = file.name;
+      const info = document.createElement("div");
+      info.className = "post-info";
+      info.innerHTML = `
+        ${post.caption ? `<div class="caption">${escapeHtml(post.caption)}</div>` : ""}
+        <div class="filename">${escapeHtml(post.file_path)}</div>
+      `;
 
       const actions = document.createElement("div");
       actions.className = "actions";
 
       const downloadLink = document.createElement("a");
       downloadLink.className = "download-btn";
-      downloadLink.textContent = "Download";
+      downloadLink.textContent = "View";
       downloadLink.href = urlData ? urlData.signedUrl : "#";
-      downloadLink.setAttribute("download", file.name);
+      downloadLink.target = "_blank";
 
       const deleteBtn = document.createElement("button");
       deleteBtn.className = "delete-btn";
       deleteBtn.textContent = "Delete";
-      deleteBtn.addEventListener("click", () => deleteFile(file.name));
+      deleteBtn.addEventListener("click", () => deletePost(post.id, post.file_path));
 
       actions.appendChild(downloadLink);
       actions.appendChild(deleteBtn);
-      item.appendChild(nameSpan);
+      item.appendChild(info);
       item.appendChild(actions);
-      fileList.appendChild(item);
+      postList.appendChild(item);
     }
   }
 
-  async function deleteFile(fileName) {
-    if (!confirm(`Delete "${fileName}"? This cannot be undone.`)) return;
+  async function deletePost(postId, filePath) {
+    if (!confirm("Delete this post? This cannot be undone.")) return;
 
-    const { error } = await supabaseClient.storage.from(BUCKET).remove([fileName]);
-    if (error) {
-      alert("Delete failed: " + error.message);
-      return;
+    const { error: storageError } = await supabaseClient.storage
+      .from(FILES_BUCKET)
+      .remove([filePath]);
+
+    const { error: dbError } = await supabaseClient
+      .from("posts")
+      .delete()
+      .eq("id", postId);
+
+    if (storageError || dbError) {
+      alert("Delete may have partially failed. Refreshing list.");
     }
-    loadFiles();
+    loadPosts();
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
   }
 
   logoutBtn.addEventListener("click", async () => {

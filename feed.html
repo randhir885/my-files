@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Feed</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    margin: 0;
+    min-height: 100vh;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.2rem 2rem;
+    background: #1e293b;
+    border-bottom: 1px solid #334155;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  header h1 { font-size: 1.2rem; margin: 0; }
+  .nav-links { display: flex; gap: 0.6rem; align-items: center; }
+  .nav-links a, .nav-links button {
+    color: #cbd5e1;
+    text-decoration: none;
+    font-size: 0.9rem;
+    background: #475569;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .nav-links a:hover, .nav-links button:hover { background: #64748b; }
+  main {
+    max-width: 470px;
+    margin: 1.5rem auto;
+    padding: 0 1rem;
+  }
+  .post {
+    background: #1e293b;
+    border-radius: 12px;
+    margin-bottom: 1.5rem;
+    overflow: hidden;
+  }
+  .post-header {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.9rem 1rem;
+  }
+  .post-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: #334155;
+  }
+  .post-username { font-weight: 600; font-size: 0.95rem; }
+  .post-media {
+    width: 100%;
+    max-height: 500px;
+    object-fit: cover;
+    display: block;
+    background: #0f172a;
+  }
+  .post-file {
+    padding: 2rem 1rem;
+    text-align: center;
+  }
+  .post-file a {
+    display: inline-block;
+    background: #3b82f6;
+    color: white;
+    padding: 0.6rem 1.2rem;
+    border-radius: 6px;
+    text-decoration: none;
+  }
+  .post-file a:hover { background: #2563eb; }
+  .post-caption {
+    padding: 0.9rem 1rem;
+    font-size: 0.95rem;
+  }
+  .post-caption .username { font-weight: 600; margin-right: 0.4rem; }
+  .post-time {
+    padding: 0 1rem 1rem;
+    font-size: 0.78rem;
+    color: #64748b;
+  }
+  .empty, .loading {
+    text-align: center;
+    color: #94a3b8;
+    margin-top: 3rem;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Feed</h1>
+  <div class="nav-links">
+    <a href="profile.html">My Profile</a>
+    <button id="logoutBtn">Log Out</button>
+  </div>
+</header>
+
+<main>
+  <div id="postsContainer" class="loading">Loading posts...</div>
+</main>
+
+<script src="supabase-config.js"></script>
+<script>
+  const FILES_BUCKET = "files";
+  const AVATAR_BUCKET = "avatars";
+  const postsContainer = document.getElementById("postsContainer");
+  const logoutBtn = document.getElementById("logoutBtn");
+
+  const DEFAULT_AVATAR =
+    "data:image/svg+xml;utf8," +
+    encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36"><rect width="36" height="36" fill="#334155"/><text x="50%" y="58%" font-size="16" fill="#94a3b8" text-anchor="middle" font-family="sans-serif">?</text></svg>`
+    );
+
+  (async () => {
+    const { data: sessionData } = await supabaseClient.auth.getSession();
+    if (!sessionData.session) {
+      window.location.href = "index.html";
+      return;
+    }
+    loadPosts();
+  })();
+
+  function timeAgo(dateString) {
+    const seconds = Math.floor((Date.now() - new Date(dateString)) / 1000);
+    if (seconds < 60) return "just now";
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  }
+
+  async function loadPosts() {
+    const { data: posts, error } = await supabaseClient
+      .from("posts")
+      .select("id, caption, file_path, file_type, created_at, author_id")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      postsContainer.innerHTML = `<div class="empty">Could not load posts: ${error.message}</div>`;
+      return;
+    }
+
+    if (!posts || posts.length === 0) {
+      postsContainer.innerHTML = `<div class="empty">No posts yet.</div>`;
+      return;
+    }
+
+    // Fetch author profiles in one batch
+    const authorIds = [...new Set(posts.map((p) => p.author_id))];
+    const { data: authors } = await supabaseClient
+      .from("profiles")
+      .select("id, username, display_name, avatar_url")
+      .in("id", authorIds);
+
+    const authorMap = {};
+    (authors || []).forEach((a) => (authorMap[a.id] = a));
+
+    postsContainer.innerHTML = "";
+
+    for (const post of posts) {
+      const author = authorMap[post.author_id] || {
+        username: "unknown",
+        display_name: "Unknown",
+        avatar_url: null,
+      };
+
+      let avatarSrc = DEFAULT_AVATAR;
+      if (author.avatar_url) {
+        const { data: avatarUrlData } = await supabaseClient.storage
+          .from(AVATAR_BUCKET)
+          .createSignedUrl(author.avatar_url, 60 * 5);
+        if (avatarUrlData) avatarSrc = avatarUrlData.signedUrl;
+      }
+
+      const { data: fileUrlData } = await supabaseClient.storage
+        .from(FILES_BUCKET)
+        .createSignedUrl(post.file_path, 60 * 5);
+      const fileUrl = fileUrlData ? fileUrlData.signedUrl : "#";
+
+      const postEl = document.createElement("div");
+      postEl.className = "post";
+
+      const isImage = post.file_type && post.file_type.startsWith("image/");
+
+      postEl.innerHTML = `
+        <div class="post-header">
+          <img class="post-avatar" src="${avatarSrc}" alt="avatar" />
+          <span class="post-username">@${escapeHtml(author.username || "unknown")}</span>
+        </div>
+        ${
+          isImage
+            ? `<img class="post-media" src="${fileUrl}" alt="post image" />`
+            : `<div class="post-file"><a href="${fileUrl}" download>Download File</a></div>`
+        }
+        ${
+          post.caption
+            ? `<div class="post-caption"><span class="username">@${escapeHtml(
+                author.username || "unknown"
+              )}</span>${escapeHtml(post.caption)}</div>`
+            : ""
+        }
+        <div class="post-time">${timeAgo(post.created_at)}</div>
+      `;
+
+      postsContainer.appendChild(postEl);
+    }
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  logoutBtn.addEventListener("click", async () => {
+    await supabaseClient.auth.signOut();
+    window.location.href = "index.html";
+  });
+</script>
+
+</body>
+</html>

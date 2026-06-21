@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>My Profile</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    margin: 0;
+    min-height: 100vh;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.2rem 2rem;
+    background: #1e293b;
+    border-bottom: 1px solid #334155;
+  }
+  header h1 { font-size: 1.2rem; margin: 0; }
+  .nav-links { display: flex; gap: 1rem; align-items: center; }
+  .nav-links a, .nav-links button {
+    color: #cbd5e1;
+    text-decoration: none;
+    font-size: 0.9rem;
+    background: #475569;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .nav-links a:hover, .nav-links button:hover { background: #64748b; }
+  main {
+    max-width: 420px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+  }
+  .card {
+    background: #1e293b;
+    padding: 2rem;
+    border-radius: 12px;
+  }
+  .avatar-row {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: 1.5rem;
+  }
+  .avatar-preview {
+    width: 96px;
+    height: 96px;
+    border-radius: 50%;
+    background: #334155;
+    object-fit: cover;
+    margin-bottom: 0.8rem;
+  }
+  label { display: block; margin-bottom: 0.4rem; font-size: 0.9rem; color: #94a3b8; }
+  input {
+    width: 100%;
+    padding: 0.7rem;
+    margin-bottom: 1rem;
+    border-radius: 6px;
+    border: 1px solid #334155;
+    background: #0f172a;
+    color: #e2e8f0;
+    font-size: 1rem;
+  }
+  input[type="file"] { padding: 0.4rem 0; }
+  button.primary {
+    width: 100%;
+    padding: 0.8rem;
+    border: none;
+    border-radius: 6px;
+    background: #3b82f6;
+    color: white;
+    font-size: 1rem;
+    cursor: pointer;
+    margin-top: 0.5rem;
+  }
+  button.primary:hover { background: #2563eb; }
+  button.primary:disabled { background: #475569; cursor: not-allowed; }
+  .status { margin-top: 0.8rem; font-size: 0.9rem; text-align: center; min-height: 1.2rem; }
+  .status.error { color: #f87171; }
+  .status.success { color: #4ade80; }
+  .loading { text-align: center; color: #94a3b8; margin-top: 3rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>My Profile</h1>
+  <div class="nav-links">
+    <a href="feed.html">Feed</a>
+    <button id="logoutBtn">Log Out</button>
+  </div>
+</header>
+
+<main>
+  <div id="loadingMsg" class="loading">Loading profile...</div>
+  <div class="card" id="profileCard" style="display:none;">
+    <div class="avatar-row">
+      <img id="avatarPreview" class="avatar-preview" src="" alt="Profile picture" />
+      <input type="file" id="avatarInput" accept="image/*" />
+    </div>
+
+    <label for="displayName">Display Name</label>
+    <input type="text" id="displayName" maxlength="40" />
+
+    <label for="username">Username</label>
+    <input type="text" id="username" minlength="3" maxlength="20" pattern="[a-zA-Z0-9_]+" />
+
+    <button class="primary" id="saveBtn">Save Changes</button>
+    <div class="status" id="statusMsg"></div>
+  </div>
+</main>
+
+<script src="supabase-config.js"></script>
+<script>
+  const AVATAR_BUCKET = "avatars";
+  let currentUserId = null;
+  let currentAvatarPath = null;
+
+  const loadingMsg = document.getElementById("loadingMsg");
+  const profileCard = document.getElementById("profileCard");
+  const avatarPreview = document.getElementById("avatarPreview");
+  const avatarInput = document.getElementById("avatarInput");
+  const displayNameInput = document.getElementById("displayName");
+  const usernameInput = document.getElementById("username");
+  const saveBtn = document.getElementById("saveBtn");
+  const statusMsg = document.getElementById("statusMsg");
+  const logoutBtn = document.getElementById("logoutBtn");
+
+  const DEFAULT_AVATAR =
+    "data:image/svg+xml;utf8," +
+    encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><rect width="96" height="96" fill="#334155"/><text x="50%" y="55%" font-size="40" fill="#94a3b8" text-anchor="middle" font-family="sans-serif">?</text></svg>`
+    );
+
+  (async () => {
+    const { data: sessionData } = await supabaseClient.auth.getSession();
+    if (!sessionData.session) {
+      window.location.href = "index.html";
+      return;
+    }
+    currentUserId = sessionData.session.user.id;
+
+    const { data: profile, error } = await supabaseClient
+      .from("profiles")
+      .select("username, display_name, avatar_url")
+      .eq("id", currentUserId)
+      .single();
+
+    if (error) {
+      loadingMsg.textContent = "Could not load profile: " + error.message;
+      return;
+    }
+
+    displayNameInput.value = profile.display_name || "";
+    usernameInput.value = profile.username || "";
+    currentAvatarPath = profile.avatar_url || null;
+
+    if (currentAvatarPath) {
+      const { data: urlData } = await supabaseClient.storage
+        .from(AVATAR_BUCKET)
+        .createSignedUrl(currentAvatarPath, 60 * 5);
+      avatarPreview.src = urlData ? urlData.signedUrl : DEFAULT_AVATAR;
+    } else {
+      avatarPreview.src = DEFAULT_AVATAR;
+    }
+
+    loadingMsg.style.display = "none";
+    profileCard.style.display = "block";
+  })();
+
+  // Live preview when picking a new avatar file
+  avatarInput.addEventListener("change", () => {
+    const file = avatarInput.files[0];
+    if (file) {
+      avatarPreview.src = URL.createObjectURL(file);
+    }
+  });
+
+  saveBtn.addEventListener("click", async () => {
+    statusMsg.className = "status";
+    statusMsg.textContent = "Saving...";
+    saveBtn.disabled = true;
+
+    const newDisplayName = displayNameInput.value.trim();
+    const newUsername = usernameInput.value.trim().toLowerCase();
+
+    if (!newDisplayName || !newUsername) {
+      statusMsg.className = "status error";
+      statusMsg.textContent = "Display name and username cannot be empty.";
+      saveBtn.disabled = false;
+      return;
+    }
+
+    // If username changed, check it's not taken by someone else
+    const { data: existing } = await supabaseClient
+      .from("profiles")
+      .select("id")
+      .eq("username", newUsername)
+      .neq("id", currentUserId)
+      .maybeSingle();
+
+    if (existing) {
+      statusMsg.className = "status error";
+      statusMsg.textContent = "That username is already taken.";
+      saveBtn.disabled = false;
+      return;
+    }
+
+    let avatarPath = currentAvatarPath;
+    const newAvatarFile = avatarInput.files[0];
+
+    if (newAvatarFile) {
+      const ext = newAvatarFile.name.split(".").pop();
+      const path = `${currentUserId}_${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabaseClient.storage
+        .from(AVATAR_BUCKET)
+        .upload(path, newAvatarFile, { upsert: true });
+
+      if (uploadError) {
+        statusMsg.className = "status error";
+        statusMsg.textContent = "Avatar upload failed: " + uploadError.message;
+        saveBtn.disabled = false;
+        return;
+      }
+      avatarPath = path;
+    }
+
+    const { error: updateError } = await supabaseClient
+      .from("profiles")
+      .update({
+        display_name: newDisplayName,
+        username: newUsername,
+        avatar_url: avatarPath,
+      })
+      .eq("id", currentUserId);
+
+    saveBtn.disabled = false;
+
+    if (updateError) {
+      statusMsg.className = "status error";
+      statusMsg.textContent = "Save failed: " + updateError.message;
+      return;
+    }
+
+    currentAvatarPath = avatarPath;
+    statusMsg.className = "status success";
+    statusMsg.textContent = "Profile updated!";
+  });
+
+  logoutBtn.addEventListener("click", async () => {
+    await supabaseClient.auth.signOut();
+    window.location.href = "index.html";
+  });
+</script>
+
+</body>
+</html>

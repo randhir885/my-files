@@ -118,14 +118,14 @@
       .single();
 
     if (error || !profile) {
-      window.location.href = "dashboard.html";
+      window.location.href = "feed.html";
       return;
     }
 
     if (profile.role === "admin") {
       window.location.href = "admin.html";
     } else {
-      window.location.href = "dashboard.html";
+      window.location.href = "feed.html";
     }
   }
 

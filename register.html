@@ -14,28 +14,20 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 100vh;
+    min-height: 100vh;
     margin: 0;
+    padding: 1.5rem;
   }
   .card {
     background: #1e293b;
     padding: 2.5rem;
     border-radius: 12px;
     width: 100%;
-    max-width: 360px;
+    max-width: 380px;
     box-shadow: 0 10px 30px rgba(0,0,0,0.3);
   }
-  h1 {
-    margin: 0 0 1.5rem;
-    font-size: 1.5rem;
-    text-align: center;
-  }
-  label {
-    display: block;
-    margin-bottom: 0.4rem;
-    font-size: 0.9rem;
-    color: #94a3b8;
-  }
+  h1 { margin: 0 0 1.5rem; font-size: 1.5rem; text-align: center; }
+  label { display: block; margin-bottom: 0.4rem; font-size: 0.9rem; color: #94a3b8; }
   input {
     width: 100%;
     padding: 0.7rem;
@@ -46,6 +38,7 @@
     color: #e2e8f0;
     font-size: 1rem;
   }
+  small { display: block; margin-top: -0.7rem; margin-bottom: 1rem; color: #64748b; font-size: 0.78rem; }
   button {
     width: 100%;
     padding: 0.8rem;
@@ -59,28 +52,10 @@
   }
   button:hover { background: #2563eb; }
   button:disabled { background: #475569; cursor: not-allowed; }
-  .error {
-    color: #f87171;
-    font-size: 0.9rem;
-    margin-top: 0.5rem;
-    text-align: center;
-    min-height: 1.2rem;
-  }
-  .success {
-    color: #4ade80;
-    font-size: 0.9rem;
-    margin-top: 0.5rem;
-    text-align: center;
-  }
-  .footer-link {
-    text-align: center;
-    margin-top: 1.2rem;
-    font-size: 0.9rem;
-  }
-  .footer-link a {
-    color: #60a5fa;
-    text-decoration: none;
-  }
+  .error { color: #f87171; font-size: 0.9rem; margin-top: 0.5rem; text-align: center; min-height: 1.2rem; }
+  .success { color: #4ade80; font-size: 0.9rem; margin-top: 0.5rem; text-align: center; }
+  .footer-link { text-align: center; margin-top: 1.2rem; font-size: 0.9rem; }
+  .footer-link a { color: #60a5fa; text-decoration: none; }
 </style>
 </head>
 <body>
@@ -90,6 +65,16 @@
   <form id="registerForm">
     <label for="email">Email</label>
     <input type="email" id="email" required autocomplete="email" />
+
+    <label for="username">Username</label>
+    <input type="text" id="username" required minlength="3" maxlength="20" pattern="[a-zA-Z0-9_]+" autocomplete="off" />
+    <small>Letters, numbers, underscores only. Must be unique.</small>
+
+    <label for="displayName">Display Name</label>
+    <input type="text" id="displayName" required maxlength="40" autocomplete="name" />
+
+    <label for="age">Age</label>
+    <input type="number" id="age" required min="1" max="120" />
 
     <label for="password">Password</label>
     <input type="password" id="password" required minlength="6" autocomplete="new-password" />
@@ -117,6 +102,23 @@
 
     const email = document.getElementById("email").value.trim();
     const password = document.getElementById("password").value;
+    const username = document.getElementById("username").value.trim().toLowerCase();
+    const displayName = document.getElementById("displayName").value.trim();
+    const age = parseInt(document.getElementById("age").value, 10);
+
+    // Check username availability before creating the account
+    const { data: existing } = await supabaseClient
+      .from("profiles")
+      .select("id")
+      .eq("username", username)
+      .maybeSingle();
+
+    if (existing) {
+      errorMsg.textContent = "That username is already taken.";
+      registerBtn.disabled = false;
+      registerBtn.textContent = "Create Account";
+      return;
+    }
 
     const { data, error } = await supabaseClient.auth.signUp({
       email,
@@ -125,6 +127,25 @@
 
     if (error) {
       errorMsg.textContent = error.message;
+      registerBtn.disabled = false;
+      registerBtn.textContent = "Create Account";
+      return;
+    }
+
+    // The profiles row was auto-created by the DB trigger with role='user'.
+    // Now fill in the extra fields we just collected.
+    const { error: updateError } = await supabaseClient
+      .from("profiles")
+      .update({
+        username: username,
+        display_name: displayName,
+        age: age,
+      })
+      .eq("id", data.user.id);
+
+    if (updateError) {
+      errorMsg.textContent =
+        "Account created, but profile setup failed: " + updateError.message;
       registerBtn.disabled = false;
       registerBtn.textContent = "Create Account";
       return;
